@@ -1,0 +1,25 @@
+schemaVersion: "2.2"        # SSM Command document schema version (2.2 is the current one)
+
+description: "Install Apache httpd and print Hello Cloud Learners" # Human-readable summary shown in the SSM console
+
+mainSteps:                             # The list of steps SSM runs, in order
+
+  - action: aws:runShellScript         # The plugin that runs shell commands (same engine behind AWS-RunShellScript)
+
+    name: installHttpd                 # A unique name for this step, useful when reading logs
+
+    inputs:                            # Settings passed to the plugin
+
+      runCommand:                      # The list of shell commands, one per line, run top to bottom
+
+        - dnf update -y                # Refresh installed packages (-y = auto-answer "yes")
+        
+        - dnf install -y httpd         # Install the Apache web server (the package is named "httpd")
+
+        - systemctl start httpd        # Start Apache now
+
+        - systemctl enable httpd       # Make Apache auto-start on every reboot
+
+        - echo "<h1>Hello Cloud Learners</h1>" > /var/www/html/index.html  # Write the HTML page into Apache's default web root
+
+        - systemctl status httpd --no-pager     # Confirm Apache is running (--no-pager avoids interactive scrolling)
