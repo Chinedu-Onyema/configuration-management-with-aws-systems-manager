@@ -1,0 +1,64 @@
+description: "Check EC2 is running, install httpd, create an AMI, print the AMI ID"   # Summary shown in the SSM console
+schemaVersion: "0.3"   # Automation documents use schema 0.3 (Command documents use 2.2)
+assumeRole: "{{ AutomationAssumeRole }}"  # The IAM role Automation assumes to call EC2 and SSM on your behalf
+parameters:                               # Inputs supplied when the runbook is started
+  InstanceId:
+    type: String
+    description: "ID of the target EC2 instance"  # The instance to check, configure and image
+  AutomationAssumeRole:
+    type: String
+    description: "ARN of the role Automation will assume"     # Passed into assumeRole above
+mainSteps:                                                    # Steps run in order, top to bottom
+
+# Step 1:
+  - name: checkInstanceRunning    # verify the instance is running
+    action: aws:assertAwsResourceProperty  # Checks a property of an AWS resource; fails if it doesn't match
+    onFailure: Abort   # Stop the whole runbook if the instance isn't running
+    inputs:
+      Service: ec2   # AWS service to call
+      Api: DescribeInstances  # API call that returns the instance details
+      InstanceIds:
+        - "{{ InstanceId }}"  # The instance to look up
+      PropertySelector: "$.Reservations[0].Instances[0].State.Name"   # JSON path to the instance's state name
+      DesiredValues:
+        - running       # The only state that lets the step pass
+  # Step 2:
+  - name: installHttpd  # install Apache on the instance
+    action: aws:runCommand   # Sends an SSM command to the instance
+    inputs:
+      DocumentName: AWS-RunShellScript  # Built-in document that runs shell commands
+      InstanceIds:
+        - "{{ InstanceId }}"  # Target instance
+      Parameters:
+        commands:
+          - dnf install -y httpd       # Install httpd
+          - systemctl start httpd      # start httpd on the EC2 instance
+          - systemctl enable httpd     # Start httpd on every reboot
+          - echo "<h1>Hello Cloud Learners</h1>" > /var/www/html/index.html   # Create the web page
+          - sync      # Force all pending writes to disk before the AMI is taken to the next step 
+# Step 3
+  - name: createAmi              # create the AMI
+    action: aws:createImage      # Builds an AMI from the instance
+    inputs:
+      InstanceId: "{{ InstanceId }}"                                    # Source instance
+      ImageName: "httpd-ami-{{ InstanceId }}-{{ global:DATE_TIME }}"    # AMI names must be unique, so a timestamp is added
+      NoReboot: false                 # reboot the AMI so the filesystem is consistent in the AMI
+# step 4
+  - name: printAmiId                           # print the AMI ID
+    action: aws:executeScript                  # Runs a short script inside Automation
+    inputs:
+      Runtime: python3.11                      # Python version used to run the script
+      Handler: handler                         # Function that Automation calls
+      InputPayload:
+        ImageId: "{{ createAmi.ImageId }}"     # Hand the AMI ID from step 3 to the script
+      Script: |
+        def handler(events, context):
+            print("AMI ID: " + events["ImageId"])
+            return {"ImageId": events["ImageId"]} 
+    outputs:
+      - Name: AmiId                            # Output name
+        Selector: "$.Payload.ImageId"          # Pulls ImageId from the script's return value
+        Type: String
+
+outputs:
+  - printAmiId.AmiId                # Shows the AMI ID in the execution's Outputs section
